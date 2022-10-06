@@ -1,3 +1,7 @@
-# ignore Directory /checkpoint, /data
+# Ignore Directory /checkpoint, /data
 /checkpoint
 /data
+/pretrained_models
+
+# Ignore the test file
+playground.py
