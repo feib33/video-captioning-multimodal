@@ -1,0 +1,10 @@
+model:
+  d_model: 768 # Input size
+  dim_feedforward: 2048 # Dimension of feedforward network model
+  nhead: 8 # Number of heads
+  num_encoder_layers: 4
+  num_decoder_layers: 4
+  dropout: 0.5
+  max_len: 5000 # The maximum length of input sentence
+  batch_first: True # (batch, seq, feature)
+  activation: "gelu" # Perform best in Transformer and used in Bert and GPT-2
