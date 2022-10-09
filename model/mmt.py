@@ -54,6 +54,10 @@ def create_mask(src, tgt, padding_idx):
     return src_mask, tgt_mask, src_padding_mask, tgt_padding_mask
 
 
+def tokenize(tokenizer, sen_batch, max_length):
+    return tokenizer(sen_batch, padding='max_length', max_length=max_length, return_tensors='pt')
+
+
 class TextEmbedding(nn.Module):
     def __init__(self, vocab_size, d_model, padding_idx, weight_is_pretrained):
         super(TextEmbedding, self).__init__()
@@ -63,9 +67,9 @@ class TextEmbedding(nn.Module):
             weight = get_bert_embedding_weight()
             self.embedding = nn.Embedding.from_pretrained(weight, freeze=True)  # TBD, if the weight need to be updated during the training, set freeze to False
 
-    def forward(self, word: str, tokenizer):
-        ids = tokenizer.encode(word, return_tensors="pt")
-        return self.embedding(ids)
+    def forward(self, sen_ids: torch.Tensor):
+        embedded = self.embedding(sen_ids)
+        return embedded
 
 
 class FeatureEmbedding(nn.Module):
@@ -94,15 +98,15 @@ class PositionalEncoding(nn.Module):
 
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, enc_inputs):  # enc_inputs: [seq_len, d_model]
-        print(enc_inputs.shape)
-        enc_inputs += self.pos_table[:enc_inputs.size(0), :]  # broadcasting is used
+    def forward(self, enc_inputs):  # enc_inputs (B, S or T, d_model)
+        enc_inputs += self.pos_table[:enc_inputs.size(1), :]  # broadcasting is used
         return self.dropout(enc_inputs)  # TBD enc_inputs.to('cuda')
 
 
 class MMT(nn.Module):
-    def __init__(self, feat_size, mode: str):
+    def __init__(self, feat_size, mode: str, d_model: int):
         super(MMT, self).__init__()
+        """
         self.transformer = nn.Transformer(
             d_model=768,  # input shape
             dim_feedforward=2048,  # dimension of feedforward network model
@@ -111,25 +115,77 @@ class MMT(nn.Module):
             num_decoder_layers=4,
             activation="gelu"  # perform best in Transformer and used in Bert and GPT-2
         )
+        """
+        self.encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=768, nhead=8, dropout=0.1,
+                                       activation="gelu", batch_first=True),
+            num_layers=4
+        )
+
+        self.decoder = nn.TransformerDecoder(
+            nn.TransformerDecoderLayer(d_model=768, nhead=8, dropout=0.1,
+                                       activation="gelu", batch_first=True),
+            num_layers=4
+        )
 
         self.mode = mode
+        self.d_model = d_model
         self.tokenizer = AutoTokenizer.from_pretrained("../pretrained_models/bert_tokenizer/")
         vocab_size = self.tokenizer.vocab_size
         padding_idx = self.tokenizer.convert_tokens_to_ids("[PAD]")
         # Preprocessing stage before processing into the Transformer
         self.enc_embedding = FeatureEmbedding(feat_size, d_model=768)
-        self.dec_embedding = TextEmbedding(vocab_size, d_model=768, padding_idx=padding_idx,
-                                           weight_is_pretrained=True)
+        self.dec_embedding= TextEmbedding(vocab_size, d_model=768, padding_idx=padding_idx,
+                                          weight_is_pretrained=True)
         self.pos_encoding = PositionalEncoding(d_model=768, dropout=0.5)
 
         self.generator = nn.Linear(768, vocab_size)
 
-    def forward(self, src: torch.Tensor, tgt: torch.LongTensor,
-                src_mask: torch.Tensor, tgt_mask: torch.Tensor,
-                src_padding_mask: torch.Tensor, tgt_padding_mask: torch.Tensor):
+    def forward(self, src: torch.Tensor, tgt: torch.Tensor, tgt_key_padding_masks: torch.Tensor):
+        # src: (N,  1, S, feat_size) -----Embedding-----> (N, 1, S, d_model)
+        # tgt: (N, T)  -----Embedding-----> (N, T, d_model)
+        # tgt_mask: (N*num_heads, T, T)
+        # src_key_padding_mask: (N, S)
+        # tgt_key_padding_mask: (N, T)
 
+        # Encoder part
+        #src_key_padding_mask = MMT.create_key_padding_mask(src)
+        #print("src_key_padding_mask", src_key_padding_mask)
+        src = self.enc_embedding(src) * math.sqrt(self.d_model)
+        src = self.pos_encoding(src)
+        memory = self.encoder(src, mask=None)
+
+        # Decoder part
+        tgt_mask = MMT.create_mask(tgt)
+        print("tgt_mask.shape", tgt_mask.shape)
+        print("tgt_padding_mask.shape", tgt_key_padding_masks.shape)
+
+        tgt = self.dec_embedding(tgt) * math.sqrt(self.d_model)
+        tgt = self.pos_encoding(tgt)
+        print("tgt.shape", tgt.shape)
+        logit = self.decoder(tgt, memory, tgt_mask=tgt_mask, tgt_key_padding_mask=tgt_key_padding_masks)
+        return logit
+
+
+
+        # Since each video contains 20 captions, video and each caption will be proceeded into encoder by looping
+
+        #return logits
+
+
+
+    @staticmethod
+    def create_mask(token):
+        return nn.Transformer.generate_square_subsequent_mask(token.shape[1])  # token.shape (B, T)
+
+    @staticmethod
+    def create_key_padding_mask(token):
+        return token == 0  # TBD assume that batch size is 1, need to be changed
+
+
+
+        """
         src_pos = self.pos_encoding(self.enc_embedding(src))
-
         if self.mode == "Inference":
             tgt_pos = self.pos_encoding(self.dec_embedding(tgt, self.tokenizer))
             out = self.transformer(src=src_pos, tgt=tgt_pos,
@@ -159,7 +215,8 @@ class MMT(nn.Module):
             return logits
         else:
             raise ValueError("The model's mode is not set up")
-
+        """
+    """
     def encoder(self, src: torch.Tensor):
         src_d = self.enc_embedding(src)
         src_pos = self.pos_encoding(src_d)
@@ -169,37 +226,50 @@ class MMT(nn.Module):
         tgt_d = self.dec_embedding(tgt, self.tokenizer)
         tgt_pos = self.pos_encoding(tgt_d)
         return self.transformer.decoder(tgt_pos, enc_output, tgt_mask)
+    """
 
 
 
-
-model = MMT(feat_size=2048, mode="Train")
+model = MMT(feat_size=2048, mode="Train", d_model=768)
 # src: [T, C]
 src = numpy.load("../data/sample/resnet152_fps3/video0.npy")
 src = torch.tensor(src, dtype=torch.float)
 
 # tgt: [S, E]
 tgt = "a car is shown"
-tgt_list = tgt.split(" ")
+tokenizer = AutoTokenizer.from_pretrained("../pretrained_models/bert_tokenizer")
 
-src_mask, tgt_mask, src_padding_mask, tgt_padding_mask = create_mask(src, tgt_list, 0)
-print(src_mask)
-print(tgt_mask)
-print(src_padding_mask)
-print(tgt_padding_mask)
+
+# at here, since this sample is unbatched, this should be (T) instead of (1, T)
+tgt_dict = tokenize(tokenizer, tgt, max_length=8)
+
+
+tgt_id = tgt_dict["input_ids"][0]
+print(tgt_id)
+tgt_key_padding_mask = tgt_dict["attention_mask"][0]
+tgt_key_padding_mask = (tgt_key_padding_mask == 0)
+print(tgt_key_padding_mask)
+
+src = src.unsqueeze(0) # Delete make a batch size
+tgt_id = tgt_id.unsqueeze(0) # Delete make a batch size
+tgt_key_padding_mask = tgt_key_padding_mask.unsqueeze(0) # Delete make a batch size
+
+logit = model(src, tgt_id, tgt_key_padding_mask)
+print("logit:", logit)
+
 # out: [B, S, vocab_size]
-logit = model(src, tgt, None, tgt_mask, src_padding_mask, tgt_padding_mask)
-print(logit)
+#logit = model(src, tgt, None, tgt_mask, src_padding_mask, tgt_padding_mask)
+#print(logit)
 
-# tgt here should be caption list () type: str, so does tgt_mask and tgt_padding_mask
-# tgt: list[20][T] , tgt_mask: list[20][T, T], tgt_padding_mask: list[20][T]
-# TODO rewrite create_mask
-# TODO figure out how src mask does
+
+
 # TODO Make use of congfig.yaml at mmt.py
-# TODO dataloader.py
+# TODO clean up the code, such as move certain functions to '/utils'
+# TODO dataloader.py (dataset: (video1.npy, caption1-string))
 # TODO train.py
 # TODO greedy algorithm
 # TODO Inference code
+# TODO The inference part in forward of model is not completed
 # TODO early_stop with loss or metrics
 # TODO log
 # TODO xtensorboard
