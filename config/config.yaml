@@ -1,0 +1,24 @@
+SYSTEM:
+  NUM_GPUS: 1
+  DEVICE_ID: 1
+  OUTPUT_DIR: ./out
+  LOG_DIR: ./log
+MODEL:
+  NAME: multi-modal transformer
+  TOKENIZER: ./pretrained_models/bert_tokenizer
+  D_MODEL: 768
+  FEAT_SIZE: 2048
+  DROPOUT: 0.5
+  ENCODER:
+    D_MODEL: 768
+    NHEAD: 8
+    DROPOUT: 0.1
+    ACTIVATION: gelu
+    NUM_LAYERS: 4
+  DECODER:
+    D_MODEL: 768
+    NHEAD: 8
+    DROPOUT: 0.1
+    ACTIVATION: gelu
+    BATCH_FIRST: True
+    NUM_LAYERS: 4
