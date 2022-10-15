@@ -1,13 +1,15 @@
 SYSTEM:
-  NUM_GPUS: 1
+  DDP: True
+  NUM_GPUS: 2
   DEVICE_ID: 1
-  OUTPUT_DIR: ./out
-  LOG_DIR: ./log
+  NUM_EPOCH: 30
+  BATCH_SIZE: 32
+  LR: 1e-4
 MODEL:
   NAME: multi-modal transformer
   TOKENIZER: ./pretrained_models/bert_tokenizer
   D_MODEL: 768
-  FEAT_SIZE: 2048
+  FEAT_SIZE: 768
   DROPOUT: 0.5
   ENCODER:
     D_MODEL: 768
@@ -22,3 +24,11 @@ MODEL:
     ACTIVATION: gelu
     BATCH_FIRST: True
     NUM_LAYERS: 4
+DATASET:
+  FEAT:
+    MOTION_FEAT: Timesformer
+    MT_PATH: ./data/MSR-VTT/feats/timesformer/howto100m
+  CAPTION:
+    PATH_TO_TRAIN: ./data/MSR-VTT/annotations/train_val_videodatainfo.json
+    PATH_TO_VALIDATE: ./data/MSR-VTT/annotations/train_val_videodatainfo.json
+    PATH_TO_TEST: ./data/MSR-VTT/annotations/test_videodatainfo.json

@@ -74,7 +74,7 @@ class PositionalEncoding(nn.Module):
         This class is borrowed from @wenjtop
         Github: https://github.com/wenjtop/transformer/blob/main/transformer.py
     """
-    def __init__(self, d_model, dropout, max_len=5000):
+    def __init__(self, d_model, dropout, device, max_len=5000):
         super(PositionalEncoding, self).__init__()
 
         pos_table = numpy.array([
@@ -82,17 +82,17 @@ class PositionalEncoding(nn.Module):
             if pos != 0 else numpy.zeros(d_model) for pos in range(max_len)])
         pos_table[1:, 0::2] = numpy.sin(pos_table[1:, 0::2])  # when even
         pos_table[1:, 1::2] = numpy.cos(pos_table[1:, 1::2])  # when odd
-        self.pos_table = torch.FloatTensor(pos_table) # enc_inputs: [seq_len, d_model] TBD FloatTensor().to("cuda")
+        self.pos_table = torch.FloatTensor(pos_table).to(device) # enc_inputs: [seq_len, d_model] TBD FloatTensor().to("cuda")
 
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, enc_inputs):  # enc_inputs (B, S or T, d_model)
-        enc_inputs += self.pos_table[:enc_inputs.size(1), :]  # broadcasting is used
+        enc_inputs += self.pos_table[:enc_inputs.size(1), :] # broadcasting is used
         return self.dropout(enc_inputs)  # TBD enc_inputs.to('cuda')
 
 
 class MMT(nn.Module):
-    def __init__(self, cfg, mode):
+    def __init__(self, cfg, mode, device):
         super(MMT, self).__init__()
         self.encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=cfg.MODEL.ENCODER.D_MODEL, nhead=cfg.MODEL.ENCODER.NHEAD,
@@ -109,6 +109,7 @@ class MMT(nn.Module):
         )
 
         self.mode = mode
+        self.device = device
         self.d_model = cfg.MODEL.D_MODEL
         self.tokenizer = AutoTokenizer.from_pretrained(cfg.MODEL.TOKENIZER) # TBD the path should be changed
         vocab_size = self.tokenizer.vocab_size
@@ -117,11 +118,12 @@ class MMT(nn.Module):
         self.enc_embedding = FeatureEmbedding(cfg.MODEL.FEAT_SIZE, d_model=cfg.MODEL.D_MODEL)
         self.dec_embedding= TextEmbedding(vocab_size, d_model=cfg.MODEL.D_MODEL, padding_idx=padding_idx,
                                           weight_is_pretrained=True)
-        self.pos_encoding = PositionalEncoding(d_model=cfg.MODEL.D_MODEL, dropout=cfg.MODEL.DROPOUT)
+        self.pos_encoding = PositionalEncoding(d_model=cfg.MODEL.D_MODEL, dropout=cfg.MODEL.DROPOUT, device=self.device)
 
         self.generator = nn.Linear(cfg.MODEL.D_MODEL, vocab_size)
 
-    def forward(self, src: torch.Tensor, tgt: torch.Tensor, tgt_key_padding_masks: torch.Tensor):
+    def forward(self, src: torch.Tensor, src_key_padding_mask: torch.Tensor,
+                tgt: torch.Tensor, tgt_mask: torch.Tensor, tgt_key_padding_masks: torch.Tensor):
         # src: (N, S, feat_size) -----Embedding-----> (N, S, d_model)
         # tgt: (N, T, vocab_size)  -----Embedding-----> (N, T, d_model)
         # src_mask: None
@@ -132,14 +134,14 @@ class MMT(nn.Module):
         # Encoder part
         src = self.enc_embedding(src) * math.sqrt(self.d_model)
         src = self.pos_encoding(src)
-        memory = self.encoder(src, mask=None, src_key_padding_mask=None)
+        memory = self.encoder(src, mask=None, src_key_padding_mask=src_key_padding_mask)
 
         # Decoder part
-        if self.mode in ["train", "validation"]:
-            tgt_mask = MMT.create_mask(tgt)
+        if self.mode in ["train", "validate"]:
             tgt = self.dec_embedding(tgt) * math.sqrt(self.d_model)
             tgt = self.pos_encoding(tgt)
             logit = self.decoder(tgt, memory, tgt_mask=tgt_mask, tgt_key_padding_mask=tgt_key_padding_masks)
+            logit = self.generator(logit)
             return logit
         elif self.mode is "test":
             print("Test mode is not constructed yet")
@@ -149,18 +151,8 @@ class MMT(nn.Module):
     def change_mode(self, mode):
         self.mode = mode
 
-    @staticmethod
-    def create_mask(token):
-        return nn.Transformer.generate_square_subsequent_mask(token.shape[1])  # token.shape (B, T)
-
-    @staticmethod
-    def create_key_padding_mask(token):
-        return token == 0  # TBD assume that batch size is 1, need to be changed
 
 
-# TODO clean up the code, such as move certain functions to '/utils'
-# TODO dataloader.py (dataset: (video1.npy, caption1-string))
-# TODO train.py
 # TODO greedy algorithm
 # TODO Inference code
 # TODO The inference part in forward of model is not completed
