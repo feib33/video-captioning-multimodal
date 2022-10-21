@@ -1,13 +1,27 @@
 import os
+import sys
 import torch
 import torch.nn.functional as F
 import numpy as np
+import logging
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from dataloader import Msrvtt, collate_fn
 
 
+def build_logger(logger_name):
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(level=logging.INFO)
+    log_formatter = logging.Formatter(fmt='%(message)s')
 
+    s_handler = logging.StreamHandler(stream=sys.stdout)
+    s_handler.setFormatter(log_formatter)
+    logger.addHandler(s_handler)
+
+    f_handler = logging.FileHandler(filename='./output.log')
+    f_handler.setFormatter(log_formatter)
+    logger.addHandler(f_handler)
+    return logger
 
 
 def build_dataloader(tokenizer, cfg):
@@ -19,15 +33,17 @@ def build_dataloader(tokenizer, cfg):
     val_dataset = Msrvtt(feat_path=cfg.DATASET.FEAT.MT_PATH,
                          cap_path=cfg.DATASET.CAPTION.PATH_TO_VALIDATE,
                          split="validate", tokenizer=tokenizer)
-
-    train_sampler = DistributedSampler(train_dataset, shuffle=True)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
-                              persistent_workers=True, num_workers=nw, collate_fn=collate_fn)
-
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
                             persistent_workers=True, num_workers=nw, collate_fn=collate_fn)
-
-    return train_loader, val_loader, train_sampler
+    if cfg.SYSTEM.DDP:
+        train_sampler = DistributedSampler(train_dataset, shuffle=True)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
+                                  persistent_workers=True, num_workers=nw, collate_fn=collate_fn)
+        return train_loader, val_loader, train_sampler
+    else:
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                                  num_workers=nw, collate_fn=collate_fn)
+        return train_loader, val_loader
 
 
 class SCELoss(torch.nn.Module):
@@ -83,13 +99,13 @@ class EarlyStopping:
         self.path = path
         self.trace_func = trace_func
 
-    def __call__(self, val_loss, model):
+    def __call__(self, val_loss, model, epoch):
 
         score = -val_loss
 
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            self.save_checkpoint(val_loss, model, epoch)
         elif score < self.best_score + self.delta:
             self.counter += 1
             self.trace_func(f'EarlyStopping counter: {self.counter} out of {self.patience}')
@@ -97,13 +113,13 @@ class EarlyStopping:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            self.save_checkpoint(val_loss, model, epoch)
             self.counter = 0
 
-    def save_checkpoint(self, val_loss, model):
+    def save_checkpoint(self, val_loss, model, epoch):
         """Saves model when validation loss decrease."""
         if self.verbose:
             self.trace_func(
-                f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
-        torch.save(model.state_dict(), self.path)
+                f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model at epoch {epoch}')
+        torch.save(model.state_dict(), self.path + epoch + ".pt")
         self.val_loss_min = val_loss

@@ -6,6 +6,7 @@ _C = CN()
 # ===================================
 _C.SYSTEM = CN()
 _C.SYSTEM.DDP = False
+_C.SYSTEM.AMP = False
 _C.SYSTEM.NUM_GPUS = 2
 _C.SYSTEM.DEVICE_ID = 1
 _C.SYSTEM.NUM_EPOCH = 30
@@ -64,7 +65,8 @@ _C.CKP = CN()
 _C.CKP.PATH = "./checkpoint"
 _C.CKP.MODEL_NAME = _C.DATASET.FEAT.MOTION_FEAT + '_'
 _C.CKP.NAME = _C.CKP.MODEL_NAME + f"bsz{_C.SYSTEM.BATCH_SIZE}_lr{_C.SYSTEM.LR}_"\
-              f"Edp{_C.MODEL.ENCODER.DROPOUT}_Ddp{_C.MODEL.DECODER.DROPOUT}"
+              f"E(nl{_C.MODEL.ENCODER.NUM_LAYERS}_dp{_C.MODEL.ENCODER.DROPOUT})_" \
+              f"D(nl{_C.MODEL.DECODER.NUM_LAYERS}_dp{_C.MODEL.DECODER.DROPOUT})"
 
 
 def get_cfg_defaults():

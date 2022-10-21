@@ -2,6 +2,7 @@
 /checkpoint
 /data
 /log
+/backup
 /pretrained_models
 /config/__pycache__
 /model/__pycache__

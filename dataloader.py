@@ -9,11 +9,13 @@ import sys
 import numpy
 import numpy as np
 import torch.nn as nn
+import logging
 """ MSR-VTT dataset """
 import os
 import torch
 import glob
 import json
+
 
 from torch.utils import data
 from transformers import AutoTokenizer
@@ -40,8 +42,10 @@ def create_vid2path(feat_path, split):
     for path in path_list:
         vid = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
         vid2path.update({vid: path})
+    """
     if is_main_rank():
-        print(f"{len(vid2path)} video found for {split}")
+        logging.info(f"{len(vid2path)} video found for {split}")
+    """
     return vid2path
 
 
@@ -57,8 +61,10 @@ def create_vid2cap(cap_path, split):
     for raw_cap in raw_captions:
         if raw_cap["video_id"] in vid2split:
             vid2cap.append((raw_cap["video_id"], raw_cap["caption"]))
+    """
     if is_main_rank():
-        print(f"{len(vid2cap)} data will be used for {split}")
+        logging.info(f"{len(vid2cap)} data will be used for {split}")
+    """
     return vid2cap
 
 
@@ -119,6 +125,10 @@ class Msrvtt(data.Dataset):
         vid, cap = self.vid2cap[idx]
         cap_ids_list = self.tokenizer.encode(cap)
         return self.vid2path[vid], cap_ids_list
+
+
+
+
 
 """
 tokenizer = AutoTokenizer.from_pretrained("./pretrained_models/bert_tokenizer")
