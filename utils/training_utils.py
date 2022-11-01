@@ -26,24 +26,33 @@ def build_logger(logger_name):
 
 def build_dataloader(tokenizer, cfg):
     batch_size = cfg.SYSTEM.BATCH_SIZE
+    eval_by_metric = cfg.SYSTEM.EVAL_BY_METRIC
     nw = min([os.cpu_count(), batch_size if batch_size > 1 else 0, 8])
     train_dataset = Msrvtt(feat_path=cfg.DATASET.FEAT.MT_PATH,
                            cap_path=cfg.DATASET.CAPTION.PATH_TO_TRAIN,
                            split="train", tokenizer=tokenizer)
-    val_dataset = Msrvtt(feat_path=cfg.DATASET.FEAT.MT_PATH,
+    val_dataset_loss = Msrvtt(feat_path=cfg.DATASET.FEAT.MT_PATH,
                          cap_path=cfg.DATASET.CAPTION.PATH_TO_VALIDATE,
                          split="validate", tokenizer=tokenizer)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False,
-                            persistent_workers=True, num_workers=nw, collate_fn=collate_fn)
+    val_loader_loss = DataLoader(val_dataset_loss, batch_size=batch_size, shuffle=False,
+                            persistent_workers=True, num_workers=nw,
+                            collate_fn=collate_fn)
+    val_dataset_metric = Msrvtt(feat_path=cfg.DATASET.FEAT.MT_PATH,
+                         cap_path=cfg.DATASET.CAPTION.PATH_TO_VALIDATE,
+                         split="validate", tokenizer=tokenizer, is_prediction=True)
+    val_loader_metric = DataLoader(val_dataset_metric, batch_size=10, shuffle=False,
+                            num_workers=0, collate_fn=collate_fn)
+
     if cfg.SYSTEM.DDP:
         train_sampler = DistributedSampler(train_dataset, shuffle=True)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler,
-                                  persistent_workers=True, num_workers=nw, collate_fn=collate_fn)
-        return train_loader, val_loader, train_sampler
+                                  persistent_workers=True, num_workers=nw,
+                                  collate_fn=collate_fn)
+        return train_loader, val_loader_loss, train_sampler, val_dataset_metric, val_loader_metric
     else:
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
                                   num_workers=nw, collate_fn=collate_fn)
-        return train_loader, val_loader
+        return train_loader, val_loader_loss, val_dataset_metric, val_loader_metric
 
 
 class SCELoss(torch.nn.Module):
@@ -121,5 +130,39 @@ class EarlyStopping:
         if self.verbose:
             self.trace_func(
                 f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model at epoch {epoch}')
-        torch.save(model.state_dict(), self.path + epoch + ".pt")
+        torch.save(model.state_dict(), self.path)
         self.val_loss_min = val_loss
+
+
+def save_by_metric(model, metric, cur_metric, epoch):
+    if not os.path.exists("./checkpoint/metric"):
+        os.makedirs("./checkpoint/metric")
+    ckp_path = "./checkpoint/metric"
+
+    # bleu
+    for i in range(4):
+        if cur_metric["bleu"][i] > metric["bleu"][i]:
+            print(f"Bleu_{i} increased ({metric['bleu'][i]:.6f} --> {cur_metric['bleu'][i]:.6f}), Saving model ...")
+            torch.save(model.state_dict(), os.path.join(ckp_path, f"bleu{i}_epoch{epoch}.pt"))
+            metric["bleu"][i] = cur_metric["bleu"][i]
+
+    # meteor
+    if cur_metric["meteor"] > metric["meteor"]:
+        print(f"METEOR increased ({metric['meteor']:.6f} --> {cur_metric['meteor']:.6f}), Saving model ...")
+        torch.save(model.state_dict(), os.path.join(ckp_path, f"meteor_epoch{epoch}.pt"))
+        metric["meteor"] = cur_metric["meteor"]
+
+    # rouge
+    if cur_metric["rouge"] > metric["rouge"]:
+        print(f"ROUGE-L increased ({metric['rouge']:.6f} --> {cur_metric['rouge']:.6f}), Saving model ...")
+        torch.save(model.state_dict(), os.path.join(ckp_path, f"rouge_epoch{epoch}.pt"))
+        metric["rouge"] = cur_metric["rouge"]
+
+    # cider
+    if cur_metric["cider"] > metric["cider"]:
+        print(f"CIDEr increased ({metric['cider']:.6f} --> {cur_metric['cider']:.6f}), Saving model ...")
+        torch.save(model.state_dict(), os.path.join(ckp_path, f"cider_epoch{epoch}.pt"))
+        metric["cider"] = cur_metric["cider"]
+
+    return metric
+

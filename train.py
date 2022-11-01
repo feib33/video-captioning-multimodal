@@ -18,6 +18,7 @@ from model.mmt import MMT
 from config.config import get_cfg_defaults
 from utils.training_utils import *
 from utils.ddp_utils import *
+from model.cap_generator import eval_dataset
 
 
 def setup(rank, world_size):
@@ -51,7 +52,7 @@ def train_one_epoch(model, dataloader, optimizer, scaler, criterion, device, cfg
     for batch_idx, data in enumerate(dataloader):
         (src, src_key_padding_mask,
          tgt_input, tgt_output,
-         tgt_mask, tgt_key_padding_mask) = data
+         tgt_mask, tgt_key_padding_mask, _) = data
 
         # Put data on gpu
         (src, src_key_padding_mask,
@@ -102,7 +103,7 @@ def val_one_epoch(model, dataloader, criterion, device, cfg):
 
         (src, src_key_padding_mask,
          tgt_input, tgt_output,
-         tgt_mask, tgt_key_padding_mask) = data
+         tgt_mask, tgt_key_padding_mask, _) = data
 
         # Put data on gpu
         (src, src_key_padding_mask,
@@ -139,6 +140,9 @@ def train(cfg):
     early_stopping = EarlyStopping(verbose=True, path=os.path.join(cfg.CKP.PATH, ckp_name + f"_early_stopping_at_epoch"))
     writer = SummaryWriter(os.path.join(cfg.SYSTEM.LOG_DIR, ckp_name))
     tokenizer = AutoTokenizer.from_pretrained("./pretrained_models/bert_tokenizer")
+    total_time = 0
+    metric = {"bleu": [0, 0, 0, 0], "meteor": 0,
+              "rouge": 0, "cider": 0}
 
 
     # ===========================================
@@ -151,7 +155,7 @@ def train(cfg):
     logger.info(f"===" * 10)
     logger.info(f"Loading dataset")
     logger.info(f"===" * 10)
-    train_loader, val_loader = build_dataloader(tokenizer, cfg)
+    train_loader, val_loader, val_dataset_metric, val_loader_metric = build_dataloader(tokenizer, cfg)
 
     # ===========================================
     # Initial hyper-parameters
@@ -183,21 +187,36 @@ def train(cfg):
         # Validate one epoch
         val_loss= val_one_epoch(model, val_loader, criterion, device, cfg)
         scheduler.step()
+        total_time += (end_time - start_time)
+        metric_cur_epoch = eval_dataset(model, val_dataset_metric, val_loader_metric, 30, device, tokenizer)  # TBD change 30 to cfg
+        updated_metric = save_by_metric(model, metric, metric_cur_epoch, cur_epoch)
+        metric.update(updated_metric)
+
         # Write down the training loss and val loss into tensorboard
-        logger.info(f"Train loss: {train_loss}, Val loss: {val_loss}, Spent {(end_time - start_time):.3f}s ")
+        logger.info(f"Train loss: {train_loss}, Val loss: {val_loss}, Spent {(end_time - start_time):.3f}s, Total time: {total_time:.3f}s ")
+        logger.info(f"BLEU: {metric_cur_epoch['bleu']}, METEOR: {metric_cur_epoch['meteor']:.6f}, "
+                    f"ROUGE_L: {metric_cur_epoch['rouge']:.6f}, CIDEr: {metric_cur_epoch['cider']:.6f}")
         writer.add_scalars(main_tag='Loss/epoch',
                            tag_scalar_dict={'train loss': train_loss,
                                             'val loss': val_loss},
                            global_step=cur_epoch)
         writer.add_scalar('lr/epoch', optimizer.state_dict()['param_groups'][0]['lr'], cur_epoch)
         writer.add_scalar('Loss/lr', train_loss, optimizer.state_dict()['param_groups'][0]['lr'])
+        writer.add_scalars('bleu/epoch', tag_scalar_dict={'bleu_1': metric_cur_epoch["bleu"][0],
+                                                          'bleu_2': metric_cur_epoch["bleu"][1],
+                                                          'bleu_3': metric_cur_epoch["bleu"][2],
+                                                          'bleu_4': metric_cur_epoch["bleu"][3]},
+                           global_step=cur_epoch)
+        writer.add_scalar('meteor/epoch', metric_cur_epoch["meteor"], cur_epoch)
+        writer.add_scalar('rouge/epoch', metric_cur_epoch["rouge"], cur_epoch)
+        writer.add_scalar('cider/epoch', metric_cur_epoch["cider"], cur_epoch)
 
         # Save checkpoint
         early_stopping(val_loss, model, cur_epoch)
-        ckp_name = os.path.join(cfg.CKP.PATH, ckp_name + f"_epoch{cur_epoch}.pth")
+        #ckp_name = )
         if cur_epoch % 5 == 0:
             logger.info("Saving checkpoint ...")
-            torch.save(model.state_dict(), ckp_name)
+        torch.save(model.state_dict(), os.path.join(cfg.CKP.PATH, ckp_name + f"_epoch{cur_epoch}.pth"))
         if early_stopping.early_stop:
             logger.info(f" ### Early stopped ###")
             break

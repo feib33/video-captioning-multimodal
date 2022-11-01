@@ -35,25 +35,15 @@ def get_bert_embedding_weight():
             return v
 
 
-"""
-    FUNCTION: generate_square_subsequent_mask() and create_mask() 
-    is borrowed from official pytorch tutorial and partial modified
-    and webpage is https://pytorch.org/tutorials/beginner/translation_transformer.html
-"""
-
-
-
-
-
-
 class TextEmbedding(nn.Module):
-    def __init__(self, vocab_size, d_model, padding_idx, weight_is_pretrained):
+    def __init__(self, vocab_size, cfg, d_model, padding_idx, weight_is_pretrained):
         super(TextEmbedding, self).__init__()
         if weight_is_pretrained is False:
             self.embedding = nn.Embedding(vocab_size, d_model, padding_idx=padding_idx)
         else:
             weight = get_bert_embedding_weight()
-            self.embedding = nn.Embedding.from_pretrained(weight, freeze=True)  # TBD, if the weight need to be updated during the training, set freeze to False
+            freeze = not cfg.MODEL.EMB_TRAIN
+            self.embedding = nn.Embedding.from_pretrained(weight, freeze=freeze)  # TBD, if the weight need to be updated during the training, set freeze to False
 
     def forward(self, sen_ids: torch.Tensor):
         embedded = self.embedding(sen_ids)
@@ -116,14 +106,14 @@ class MMT(nn.Module):
         padding_idx = self.tokenizer.convert_tokens_to_ids("[PAD]")
         # Preprocessing stage before processing into the Transformer
         self.enc_embedding = FeatureEmbedding(cfg.MODEL.FEAT_SIZE, d_model=cfg.MODEL.D_MODEL)
-        self.dec_embedding= TextEmbedding(vocab_size, d_model=cfg.MODEL.D_MODEL, padding_idx=padding_idx,
+        self.dec_embedding= TextEmbedding(vocab_size, cfg, d_model=cfg.MODEL.D_MODEL, padding_idx=padding_idx,
                                           weight_is_pretrained=True)
         self.pos_encoding = PositionalEncoding(d_model=cfg.MODEL.D_MODEL, dropout=cfg.MODEL.DROPOUT, device=self.device)
 
         self.generator = nn.Linear(cfg.MODEL.D_MODEL, vocab_size)
 
     def forward(self, src: torch.Tensor, src_key_padding_mask: torch.Tensor,
-                tgt: torch.Tensor, tgt_mask: torch.Tensor, tgt_key_padding_masks: torch.Tensor):
+                tgt: torch.Tensor, tgt_mask: torch.Tensor, tgt_key_padding_mask: torch.Tensor):
         # src: (N, S, feat_size) -----Embedding-----> (N, S, d_model)
         # tgt: (N, T, vocab_size)  -----Embedding-----> (N, T, d_model)
         # src_mask: None
@@ -132,30 +122,46 @@ class MMT(nn.Module):
         # tgt_key_padding_mask: (N, T)
 
         # Encoder part
+        """
         src = self.enc_embedding(src) * math.sqrt(self.d_model)
         src = self.pos_encoding(src)
         memory = self.encoder(src, mask=None, src_key_padding_mask=src_key_padding_mask)
+        """
+        memory = self.encode(src, src_key_padding_mask)
 
         # Decoder part
         if self.mode in ["train", "validate"]:
+            """
             tgt = self.dec_embedding(tgt) * math.sqrt(self.d_model)
             tgt = self.pos_encoding(tgt)
             logit = self.decoder(tgt, memory, tgt_mask=tgt_mask, tgt_key_padding_mask=tgt_key_padding_masks)
             logit = self.generator(logit)
-            return logit
+            """
+            return self.decode(memory, tgt, tgt_mask, tgt_key_padding_mask)
         elif self.mode is "test":
-            print("Test mode is not constructed yet")
+            return self.decode(memory, tgt, tgt_mask, tgt_key_padding_mask)
+
         else:
             raise ValueError("The mode of model must be 'train', 'validation' or 'test'!")
 
     def change_mode(self, mode):
         self.mode = mode
 
+    def encode(self, src, src_key_padding_mask):
+        src = self.enc_embedding(src) * math.sqrt(self.d_model)
+        src = self.pos_encoding(src)
+        return self.encoder(src, mask=None, src_key_padding_mask=src_key_padding_mask)
+
+    def decode(self, memory, tgt, tgt_mask, tgt_key_padding_mask):
+        tgt = self.dec_embedding(tgt) * math.sqrt(self.d_model)
+        tgt = self.pos_encoding(tgt)
+        logit = self.decoder(tgt, memory, tgt_mask=tgt_mask, tgt_key_padding_mask=tgt_key_padding_mask)
+        out = self.generator(logit)
+        return out
 
 
 # TODO greedy algorithm
 # TODO Inference code
 # TODO The inference part in forward of model is not completed
-# TODO early_stop with loss or metrics
-# TODO log
-# TODO xtensorboard
+# TODO early_stop with metrics
+# TODO preprocess dataset

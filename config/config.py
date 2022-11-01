@@ -14,6 +14,7 @@ _C.SYSTEM.BATCH_SIZE = 32
 _C.SYSTEM.LR = 1e-4
 _C.SYSTEM.OUTPUT_DIR = "./out"
 _C.SYSTEM.LOG_DIR = "./log"
+_C.SYSTEM.EVAL_BY_METRIC = True
 
 # ===================================
 # Config Model
@@ -24,6 +25,7 @@ _C.MODEL.TOKENIZER = "bert-base-uncased"
 _C.MODEL.D_MODEL = 768
 _C.MODEL.FEAT_SIZE = 2048
 _C.MODEL.DROPOUT = 0.5
+_C.MODEL.EMB_TRAIN = False
 # -----------------------------------
 # Config Model Encoder Part
 # -----------------------------------
@@ -59,14 +61,19 @@ _C.DATASET.CAPTION.PATH_TO_VALIDATE = "./data/MSR-VTT/annotations/train_val_vide
 _C.DATASET.CAPTION.PATH_TO_TEST = "./data/MSR-VTT/annotations/test_videodatainfo.json"
 
 # ------------------------------------
+# Config inference
+# ------------------------------------
+_C.PREDICT = CN()
+_C.PREDICT.CHECKPOINT = "/home/feib/video-captioning/backup/onegpu/cosineanealling_lr/ckp/timesformer_bsz32_lr0.0001_E(nl2_dp0.3)_D(nl4_dp0.3)_early_stopping.pth"
+
+
+# ------------------------------------
 # Config checkpoint's name
 # ------------------------------------
 _C.CKP = CN()
 _C.CKP.PATH = "./checkpoint"
 _C.CKP.MODEL_NAME = _C.DATASET.FEAT.MOTION_FEAT + '_'
-_C.CKP.NAME = _C.CKP.MODEL_NAME + f"bsz{_C.SYSTEM.BATCH_SIZE}_lr{_C.SYSTEM.LR}_"\
-              f"E(nl{_C.MODEL.ENCODER.NUM_LAYERS}_dp{_C.MODEL.ENCODER.DROPOUT})_" \
-              f"D(nl{_C.MODEL.DECODER.NUM_LAYERS}_dp{_C.MODEL.DECODER.DROPOUT})"
+
 
 
 def get_cfg_defaults():

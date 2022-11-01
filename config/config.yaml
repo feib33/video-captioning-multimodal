@@ -6,12 +6,14 @@ SYSTEM:
   NUM_EPOCH: 50
   BATCH_SIZE: 32
   LR: 1e-4
+  EVAL_BY_METRIC: True
 MODEL:
   NAME: multi-modal transformer
   TOKENIZER: ./pretrained_models/bert_tokenizer
   D_MODEL: 768
-  FEAT_SIZE: 768
+  FEAT_SIZE: 2048
   DROPOUT: 0.3
+  EMB_TRAIN: False
   ENCODER:
     D_MODEL: 768
     NHEAD: 8
@@ -28,8 +30,10 @@ MODEL:
 DATASET:
   FEAT:
     MOTION_FEAT: Timesformer
-    MT_PATH: ./data/MSR-VTT/feats/timesformer/howto100m
+    MT_PATH: ./data/MSR-VTT/feats/resnet152
   CAPTION:
     PATH_TO_TRAIN: ./data/MSR-VTT/annotations/train_val_videodatainfo.json
     PATH_TO_VALIDATE: ./data/MSR-VTT/annotations/train_val_videodatainfo.json
     PATH_TO_TEST: ./data/MSR-VTT/annotations/test_videodatainfo.json
+PREDICT:
+  CHECKPOINT: /home/feib/video-captioning/backup/onegpu/cosineanealling_lr/ckp/timesformer_bsz32_lr0.0001_E(nl2_dp0.3)_D(nl4_dp0.3)_early_stopping.pth
